@@ -1,0 +1,72 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.graph_objects as go
+from ta.volatility import BollingerBands
+from ta.momentum import RSIIndicator
+from openai import OpenAI
+import io
+
+# Initialize AI
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+def get_technical_data(ticker):
+df = yf.download(ticker, period="60d", interval="1d")
+# Add Technical Indicators
+df['RSI'] = RSIIndicator(df['Close']).rsi()
+bb = BollingerBands(df['Close'])
+df['BB_High'] = bb.bollinger_hband()
+df['BB_Low'] = bb.bollinger_lband()
+return df
+
+st.set_page_config(layout="wide", page_title="Pro AI Chartist")
+st.title("🏹 Pro AI Technical Analysis Suite")
+
+# Sidebar - User Inputs
+with st.sidebar:
+st.header("Settings")
+ticker = st.text_input("Enter Ticker (e.g., BTC-USD, TSLA, NVDA)", "BTC-USD")
+risk_pct = st.slider("Risk per trade (%)", 0.5, 5.0, 1.0)
+balance = st.number_input("Account Balance ($)", value=10000)
+
+if ticker:
+data = get_technical_data(ticker)
+
+# 1. Create Interactive Chart
+fig = go.Figure(data=[go.Candlestick(x=data.index,
+open=data['Open'], high=data['High'],
+low=data['Low'], close=data['Close'], name="Price")])
+fig.add_trace(go.Scatter(x=data.index, y=data['BB_High'], line=dict(color='rgba(173, 216, 230, 0.5)'), name="BB High"))
+fig.add_trace(go.Scatter(x=data.index, y=data['BB_Low'], line=dict(color='rgba(173, 216, 230, 0.5)'), name="BB Low"))
+
+st.plotly_chart(fig, use_container_width=True)
+
+# 2. Trigger AI Analysis
+if st.button("Generate Professional Deep-Dive"):
+# Save chart as image for the AI to "see"
+img_bytes = fig.to_image(format="png")
+
+# Prepare Data Summary for the AI
+latest_rsi = data['RSI'].iloc[-1]
+current_price = data['Close'].iloc[-1]
+
+prompt = f"""
+Analyze {ticker} at current price {current_price:.2f}.
+Technical Stats: RSI is {latest_rsi:.2f}.
+Provide a professional 'Institutional Grade' report:
+- Market Structure: (Break of Structure or Change of Character?)
+- Liquidity Zones: Where are the buy-side and sell-side liquidity resting?
+- Fibonacci Levels: Potential retracement targets.
+- Trade Execution: Provide Entry, SL, and TP.
+- Risk Management: Based on a ${balance} balance and {risk_pct}% risk, how many units should I buy?
+"""
+
+# AI Vision/Chat Call (Simplified for brevity)
+response = client.chat.completions.create(
+model="gpt-4o",
+messages=[{"role": "user", "content": prompt}]
+)
+
+st.subheader("📋 Institutional Analysis Report")
+st.write(response.choices[0].message.content)
+
